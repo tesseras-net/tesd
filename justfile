@@ -1,4 +1,4 @@
-# tessera-repl development automation
+# tesd development automation
 # Run `just` to see all available recipes
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
