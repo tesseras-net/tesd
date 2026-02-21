@@ -1,0 +1,36 @@
+[package]
+name = "tesd"
+version = "0.1.0"
+authors = ["Murilo Ijanc <murilo@ijanc.org>"]
+categories = ["network-programming"]
+edition = "2024"
+homepage = "https://tesseras.net"
+keywords = ["dht", "daemon", "p2p", "tesseras"]
+license = "ISC"
+repository = "https://git.sr.ht/~ijanc/tesd"
+description = "Tesseras DHT daemon for running bootstrap nodes"
+
+[dependencies]
+anyhow = "1"
+getopts = "0.2"
+log = "0.4"
+syslog = "7"
+tesseras-dht = { path = "../dht" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+tracing = "0.1"
+tracing-log = "0.2"
+tracing-subscriber = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
