@@ -99,7 +99,7 @@ release: _require-clean _require-tools
     # 6. Push to all remotes
     echo "==> Pushing to remotes"
     git push sr main --tags
-    git push github main --tags
+    git push gh main --tags
 
     # 7. Create GitHub release with changelog for this version
     echo "==> Creating GitHub release"
@@ -107,7 +107,7 @@ release: _require-clean _require-tools
     gh release create "${NEXT_VERSION}" \
         --title "${NEXT_VERSION}" \
         --notes "${RELEASE_NOTES}" \
-        --repo tesseras-net/tesseras-repl
+        --repo tesseras-net/tesd
 
     echo "==> Release ${NEXT_VERSION} complete!"
 
@@ -130,20 +130,20 @@ release-dry: _require-clean
     echo "5. git commit -m 'chore(release): ${NEXT_VERSION}'"
     echo "6. git tag -a ${NEXT_VERSION}"
     echo "7. git push sr main --tags"
-    echo "8. git push github main --tags"
+    echo "8. git push gh main --tags"
     echo "9. gh release create ${NEXT_VERSION}"
 
 # ─── Git Remotes ──────────────────────────────────────────────
 
-# Push to all remotes (sr + github)
+# Push to all remotes (sr + gh)
 push:
     git push sr main
-    git push github main
+    git push gh main
 
 # Push with tags to all remotes
 push-tags:
     git push sr main --tags
-    git push github main --tags
+    git push gh main --tags
 
 # ─── Internal helpers ─────────────────────────────────────────
 
