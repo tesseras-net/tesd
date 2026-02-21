@@ -32,9 +32,7 @@ fn parse_listen_addr(s: &str) -> Result<SocketAddr> {
             .map_err(|e| anyhow::anyhow!("bad IP '{ip_str}': {e}"))?;
         let port: u16 = port_str
             .parse()
-            .map_err(|e| {
-                anyhow::anyhow!("bad port '{port_str}': {e}")
-            })?;
+            .map_err(|e| anyhow::anyhow!("bad port '{port_str}': {e}"))?;
         Ok(SocketAddr::new(ip, port))
     } else {
         let ip: IpAddr = s
@@ -62,8 +60,7 @@ fn parse_args() -> Result<Opts> {
         [-a ip[@port]] [-b host[@port]] \
         [-D datadir] [-V level]";
 
-    let matches =
-        opts.parse(&args[1..]).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let matches = opts.parse(&args[1..]).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if matches.opt_present("h") {
         eprint!("{}", opts.usage(usage_line));
@@ -213,10 +210,8 @@ fn setup_logging(foreground: bool, verbosity: u8) -> Result<()> {
         let logger = syslog::unix(formatter)
             .map_err(|e| anyhow::anyhow!("syslog: {e}"))?;
 
-        log::set_boxed_logger(Box::new(
-            syslog::BasicLogger::new(logger),
-        ))
-        .map_err(|e| anyhow::anyhow!("set logger: {e}"))?;
+        log::set_boxed_logger(Box::new(syslog::BasicLogger::new(logger)))
+            .map_err(|e| anyhow::anyhow!("set logger: {e}"))?;
 
         log::set_max_level(match level {
             Level::ERROR => log::LevelFilter::Error,
@@ -293,12 +288,8 @@ fn write_pid_file(data_dir: &Path) -> Result<std::fs::File> {
         .open(&pid_path)?;
 
     // Exclusive lock — fails if another instance holds it
-    let ret = unsafe {
-        libc::flock(
-            file.as_raw_fd(),
-            libc::LOCK_EX | libc::LOCK_NB,
-        )
-    };
+    let ret =
+        unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if ret < 0 {
         bail!(
             "another instance is running (cannot lock {})",
@@ -334,9 +325,8 @@ async fn resolve_peer(
     ipv6_only: bool,
 ) -> Result<Vec<SocketAddr>> {
     let (host, port) = if let Some((h, p)) = s.rsplit_once('@') {
-        let port: u16 = p
-            .parse()
-            .map_err(|_| anyhow::anyhow!("bad port '{p}'"))?;
+        let port: u16 =
+            p.parse().map_err(|_| anyhow::anyhow!("bad port '{p}'"))?;
         (h.to_string(), port)
     } else {
         (s.to_string(), DEFAULT_PORT)
@@ -367,9 +357,7 @@ async fn resolve_peer(
                     .collect();
 
                 if filtered.is_empty() {
-                    bail!(
-                        "no addresses found for '{host}'"
-                    );
+                    bail!("no addresses found for '{host}'");
                 }
                 return Ok(filtered);
             }
@@ -381,10 +369,7 @@ async fn resolve_peer(
                         attempt = attempt + 1,
                         "DNS resolution failed, retrying"
                     );
-                    tokio::time::sleep(
-                        Duration::from_secs(1 << attempt),
-                    )
-                    .await;
+                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
                 }
             }
         }
@@ -414,15 +399,9 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
     let bind_addr = if let Some(addr) = opts.listen_addr {
         addr
     } else if opts.ipv4_only {
-        SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            DEFAULT_PORT,
-        )
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)
     } else {
-        SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            DEFAULT_PORT,
-        )
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_PORT)
     };
     builder = builder.bind(bind_addr);
 
@@ -445,13 +424,7 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
     // Resolve and bootstrap peers
     let mut all_addrs = Vec::new();
     for peer in &opts.bootstrap_peers {
-        match resolve_peer(
-            peer,
-            opts.ipv4_only,
-            opts.ipv6_only,
-        )
-        .await
-        {
+        match resolve_peer(peer, opts.ipv4_only, opts.ipv6_only).await {
             Ok(addrs) => {
                 tracing::info!(
                     peer = %peer,
@@ -476,9 +449,7 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
     let bootstrap_handle = if !all_addrs.is_empty() {
         let node_handle = Arc::clone(&node);
         Some(tokio::spawn(async move {
-            if let Err(e) =
-                node_handle.bootstrap(all_addrs).await
-            {
+            if let Err(e) = node_handle.bootstrap(all_addrs).await {
                 tracing::warn!(
                     error = %e,
                     "bootstrap failed"
@@ -490,60 +461,49 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
     };
 
     // Spawn periodic re-bootstrap task
-    let rebootstrap_handle =
-        if !opts.bootstrap_peers.is_empty() {
-            let node_handle = Arc::clone(&node);
-            let peers = opts.bootstrap_peers.clone();
-            let ipv4_only = opts.ipv4_only;
-            let ipv6_only = opts.ipv6_only;
+    let rebootstrap_handle = if !opts.bootstrap_peers.is_empty() {
+        let node_handle = Arc::clone(&node);
+        let peers = opts.bootstrap_peers.clone();
+        let ipv4_only = opts.ipv4_only;
+        let ipv6_only = opts.ipv6_only;
 
-            Some(tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(REBOOTSTRAP_INTERVAL)
-                        .await;
+        Some(tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(REBOOTSTRAP_INTERVAL).await;
 
-                    let mut addrs = Vec::new();
-                    for peer in &peers {
-                        match resolve_peer(
-                            peer, ipv4_only, ipv6_only,
-                        )
-                        .await
-                        {
-                            Ok(a) => addrs.extend(a),
-                            Err(e) => {
-                                tracing::warn!(
-                                    peer = %peer,
-                                    error = %e,
-                                    "re-bootstrap: resolve \
-                                     failed"
-                                );
-                            }
-                        }
-                    }
-
-                    if !addrs.is_empty() {
-                        match node_handle
-                            .bootstrap(addrs)
-                            .await
-                        {
-                            Ok(()) => {
-                                tracing::debug!(
-                                    "re-bootstrap completed"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    error = %e,
-                                    "re-bootstrap failed"
-                                );
-                            }
+                let mut addrs = Vec::new();
+                for peer in &peers {
+                    match resolve_peer(peer, ipv4_only, ipv6_only).await {
+                        Ok(a) => addrs.extend(a),
+                        Err(e) => {
+                            tracing::warn!(
+                                peer = %peer,
+                                error = %e,
+                                "re-bootstrap: resolve \
+                                 failed"
+                            );
                         }
                     }
                 }
-            }))
-        } else {
-            None
-        };
+
+                if !addrs.is_empty() {
+                    match node_handle.bootstrap(addrs).await {
+                        Ok(()) => {
+                            tracing::debug!("re-bootstrap completed");
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "re-bootstrap failed"
+                            );
+                        }
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
 
     // Wait for shutdown signal
     #[cfg(unix)]
@@ -614,8 +574,7 @@ fn main() {
 
     // Logging must be set up after fork (syslog connects
     // from child)
-    if let Err(e) = setup_logging(opts.foreground, opts.verbosity)
-    {
+    if let Err(e) = setup_logging(opts.foreground, opts.verbosity) {
         eprintln!("tesd: {e}");
         process::exit(1);
     }
@@ -637,8 +596,7 @@ fn main() {
     };
 
     // Build and run tokio runtime
-    let rt = tokio::runtime::Runtime::new()
-        .expect("failed to create runtime");
+    let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
     if let Err(e) = rt.block_on(run(opts, &data_dir)) {
         tracing::error!(error = %e, "fatal error");
         remove_pid_file(&data_dir);
@@ -655,10 +613,7 @@ mod tests {
     #[test]
     fn parse_listen_addr_ipv4_with_port() {
         let addr = parse_listen_addr("127.0.0.1@8080").unwrap();
-        assert_eq!(
-            addr.ip(),
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
-        );
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         assert_eq!(addr.port(), 8080);
     }
 

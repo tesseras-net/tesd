@@ -1564,6 +1564,7 @@ dependencies = [
 [[package]]
 name = "tesseras-dht"
 version = "0.2.0-rc.2"
+source = "git+https://git.sr.ht/~ijanc/tesseras-dht?tag=v0.2.0-rc.2#a7ccf0e6e931e23f334e7ed24a6ae300b5983223"
 dependencies = [
  "base64",
  "ed25519-dalek",
