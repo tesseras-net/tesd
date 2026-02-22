@@ -14,7 +14,7 @@ description = "Tesseras DHT daemon for running bootstrap nodes"
 anyhow = "1"
 log = "0.4"
 syslog = "7"
-tesseras-dht = { git = "https://git.sr.ht/~ijanc/tesseras-dht", tag = "v0.2.0-rc.2" }
+tesseras-dht = { path = "/home/ijanc/src/tes/tesseras-dht/.worktrees/update-config" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
 tracing = "0.1"
 tracing-log = "0.2"

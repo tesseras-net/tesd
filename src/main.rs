@@ -420,6 +420,7 @@ async fn run(
                 match config::Config::parse(&config_path) {
                     Ok(new_cfg) => {
                         cfg.log_reload_diff(&new_cfg);
+                        node.update_config(new_cfg.to_node_config()).await;
                         cfg = new_cfg;
                         tracing::info!("configuration reloaded");
                     }
