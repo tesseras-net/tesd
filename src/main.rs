@@ -1,3 +1,5 @@
+mod config;
+
 use std::env;
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
