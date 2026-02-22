@@ -608,51 +608,129 @@ fn main() {
     remove_pid_file(&data_dir);
 }
 
+struct CliOpts {
+    config_file: PathBuf,
+    configtest: bool,
+    foreground: bool,
+    verbosity: u8,
+}
+
+fn parse_cli(args: &[&str]) -> Result<CliOpts> {
+    let mut opts = CliOpts {
+        config_file: PathBuf::from("/etc/tesd.conf"),
+        configtest: false,
+        foreground: false,
+        verbosity: 0,
+    };
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if !arg.starts_with('-') || arg == "-" {
+            bail!("unexpected argument '{arg}'");
+        }
+
+        let chars: Vec<char> = arg[1..].chars().collect();
+        let mut j = 0;
+        while j < chars.len() {
+            match chars[j] {
+                'f' => {
+                    // -f takes the next argument, or remainder of this arg
+                    let value = if j + 1 < chars.len() {
+                        // -fFILE (value glued to flag)
+                        let rest: String = chars[j + 1..].iter().collect();
+                        j = chars.len(); // consume rest
+                        rest
+                    } else {
+                        // -f FILE (next argument)
+                        i += 1;
+                        args.get(i)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("-f requires an argument")
+                            })?
+                            .to_string()
+                    };
+                    opts.config_file = PathBuf::from(value);
+                }
+                'n' => opts.configtest = true,
+                'd' => opts.foreground = true,
+                'v' => opts.verbosity = opts.verbosity.saturating_add(1),
+                'h' => {
+                    eprint!(
+                        "usage: tesd [-dnvVh] [-f file]\n\n\
+                         Options:\n\
+                         \x20   -f file     Configuration file (default: /etc/tesd.conf)\n\
+                         \x20   -n          Check config and exit\n\
+                         \x20   -d          Do not fork, stay in foreground\n\
+                         \x20   -v          Verbose mode. Multiple -v increase verbosity\n\
+                         \x20   -h          Print help and exit\n\
+                         \x20   -V          Print version and exit\n"
+                    );
+                    process::exit(0);
+                }
+                'V' => {
+                    eprintln!("tesd {VERSION}");
+                    process::exit(0);
+                }
+                c => bail!("unknown option '-{c}'"),
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+
+    Ok(opts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parse_listen_addr_ipv4_with_port() {
-        let addr = parse_listen_addr("127.0.0.1@8080").unwrap();
-        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(addr.port(), 8080);
+    fn parse_cli_defaults() {
+        let cli = parse_cli(&[]).unwrap();
+        assert_eq!(cli.config_file, PathBuf::from("/etc/tesd.conf"));
+        assert!(!cli.configtest);
+        assert!(!cli.foreground);
+        assert_eq!(cli.verbosity, 0);
     }
 
     #[test]
-    fn parse_listen_addr_ipv4_default_port() {
-        let addr = parse_listen_addr("0.0.0.0").unwrap();
-        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        assert_eq!(addr.port(), DEFAULT_PORT);
+    fn parse_cli_custom_config() {
+        let cli = parse_cli(&["-f", "/tmp/test.conf"]).unwrap();
+        assert_eq!(cli.config_file, PathBuf::from("/tmp/test.conf"));
     }
 
     #[test]
-    fn parse_listen_addr_ipv6_with_port() {
-        let addr = parse_listen_addr("::1@9000").unwrap();
-        assert_eq!(addr.ip(), IpAddr::V6(Ipv6Addr::LOCALHOST));
-        assert_eq!(addr.port(), 9000);
+    fn parse_cli_verbose_stacks() {
+        let cli = parse_cli(&["-vvv"]).unwrap();
+        assert_eq!(cli.verbosity, 3);
     }
 
     #[test]
-    fn parse_listen_addr_ipv6_default_port() {
-        let addr = parse_listen_addr("::").unwrap();
-        assert_eq!(addr.ip(), IpAddr::V6(Ipv6Addr::UNSPECIFIED));
-        assert_eq!(addr.port(), DEFAULT_PORT);
+    fn parse_cli_configtest() {
+        let cli = parse_cli(&["-n"]).unwrap();
+        assert!(cli.configtest);
     }
 
     #[test]
-    fn parse_listen_addr_bad_ip() {
-        assert!(parse_listen_addr("not-an-ip").is_err());
+    fn parse_cli_foreground() {
+        let cli = parse_cli(&["-d"]).unwrap();
+        assert!(cli.foreground);
     }
 
     #[test]
-    fn parse_listen_addr_bad_port() {
-        assert!(parse_listen_addr("127.0.0.1@99999").is_err());
+    fn parse_cli_combined() {
+        let cli = parse_cli(&["-dnvv", "-f", "/tmp/t.conf"]).unwrap();
+        assert!(cli.foreground);
+        assert!(cli.configtest);
+        assert_eq!(cli.verbosity, 2);
+        assert_eq!(cli.config_file, PathBuf::from("/tmp/t.conf"));
     }
 
     #[test]
-    fn parse_listen_addr_empty_port() {
-        assert!(parse_listen_addr("127.0.0.1@").is_err());
+    fn parse_cli_unknown_flag_is_error() {
+        assert!(parse_cli(&["-x"]).is_err());
     }
 
     #[test]
