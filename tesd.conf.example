@@ -1,0 +1,20 @@
+# tesd.conf — Tesseras DHT daemon configuration
+# See tesd(8) for details.
+
+# Network
+# listen on :: port 4000
+# bootstrap "tesseras.net"
+
+# Storage
+# data-dir "/var/lib/tesd"
+# max-storage 1G
+
+# Node
+# pow-difficulty 16
+# mdns no
+
+# Tuning
+# max-chunks-per-peer 256
+# write-rate 50
+# write-burst 20
+# max-handlers 256
