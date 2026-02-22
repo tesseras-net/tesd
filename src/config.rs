@@ -43,6 +43,22 @@ pub struct Config {
     pub max_handlers: usize,
 }
 
+fn parse_bool(s: &str) -> Result<bool> {
+    match s {
+        "yes" => Ok(true),
+        "no" => Ok(false),
+        _ => bail!("expected 'yes' or 'no', got '{s}'"),
+    }
+}
+
+fn unquote(s: &str) -> Result<String> {
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        Ok(s[1..s.len() - 1].to_string())
+    } else {
+        bail!("expected quoted string, got '{s}'")
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -90,6 +106,33 @@ mod tests {
         assert!(parse_size("abc").is_err());
         assert!(parse_size("").is_err());
         assert!(parse_size("1T").is_err());
+    }
+
+    #[test]
+    fn parse_bool_yes_no() {
+        assert!(parse_bool("yes").unwrap());
+        assert!(!parse_bool("no").unwrap());
+    }
+
+    #[test]
+    fn parse_bool_bad_value() {
+        assert!(parse_bool("true").is_err());
+        assert!(parse_bool("1").is_err());
+    }
+
+    #[test]
+    fn unquote_removes_double_quotes() {
+        assert_eq!(unquote("\"hello\"").unwrap(), "hello");
+    }
+
+    #[test]
+    fn unquote_rejects_unquoted() {
+        assert!(unquote("hello").is_err());
+    }
+
+    #[test]
+    fn unquote_rejects_mismatched() {
+        assert!(unquote("\"hello").is_err());
     }
 
     #[test]
