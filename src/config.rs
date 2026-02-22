@@ -1,5 +1,5 @@
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
@@ -77,6 +77,174 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// Parse a config file from disk.
+    pub fn parse(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        Self::parse_str(&content)
+    }
+
+    /// Parse config from a string (used by tests and parse).
+    pub fn parse_str(input: &str) -> Result<Self> {
+        let mut cfg = Config::default();
+        let mut listen_set = false;
+
+        for (lineno_0, raw_line) in input.lines().enumerate() {
+            let lineno = lineno_0 + 1;
+            let line = raw_line.trim();
+
+            // Skip blank lines and comments.
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            if tokens.is_empty() {
+                continue;
+            }
+
+            match tokens[0] {
+                "listen" => {
+                    if listen_set {
+                        bail!("line {lineno}: duplicate 'listen' directive");
+                    }
+                    if tokens.get(1) != Some(&"on") {
+                        bail!("line {lineno}: expected 'on' after 'listen'");
+                    }
+                    let addr_str = tokens.get(2).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "line {lineno}: missing address after 'listen on'"
+                        )
+                    })?;
+                    cfg.listen_addr = addr_str.parse().map_err(|e| {
+                        anyhow::anyhow!(
+                            "line {lineno}: bad address '{addr_str}': {e}"
+                        )
+                    })?;
+                    if tokens.get(3) == Some(&"port") {
+                        let port_str = tokens.get(4).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "line {lineno}: missing port number"
+                            )
+                        })?;
+                        cfg.listen_port = port_str.parse().map_err(|e| {
+                            anyhow::anyhow!(
+                                "line {lineno}: bad port '{port_str}': {e}"
+                            )
+                        })?;
+                    }
+                    listen_set = true;
+                }
+                "bootstrap" => {
+                    let host_raw = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "line {lineno}: missing host after 'bootstrap'"
+                        )
+                    })?;
+                    let host = if host_raw.starts_with('"') {
+                        unquote(host_raw)
+                            .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?
+                    } else {
+                        host_raw.to_string()
+                    };
+                    let mut port = DEFAULT_PORT;
+                    if tokens.get(2) == Some(&"port") {
+                        let port_str = tokens.get(3).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "line {lineno}: missing port number"
+                            )
+                        })?;
+                        port = port_str.parse().map_err(|e| {
+                            anyhow::anyhow!(
+                                "line {lineno}: bad port '{port_str}': {e}"
+                            )
+                        })?;
+                    }
+                    cfg.bootstrap_peers.push(BootstrapPeer { host, port });
+                }
+                "data-dir" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "line {lineno}: missing path after 'data-dir'"
+                        )
+                    })?;
+                    cfg.data_dir = PathBuf::from(if val.starts_with('"') {
+                        unquote(val)?
+                    } else {
+                        val.to_string()
+                    });
+                }
+                "max-storage" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "line {lineno}: missing value after 'max-storage'"
+                        )
+                    })?;
+                    cfg.max_storage = parse_size(val)
+                        .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?;
+                }
+                "pow-difficulty" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "line {lineno}: missing value after 'pow-difficulty'"
+                        )
+                    })?;
+                    cfg.pow_difficulty = val.parse().map_err(|e| {
+                        anyhow::anyhow!(
+                            "line {lineno}: bad pow-difficulty '{val}': {e}"
+                        )
+                    })?;
+                }
+                "mdns" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "line {lineno}: missing value after 'mdns'"
+                        )
+                    })?;
+                    cfg.mdns = parse_bool(val)
+                        .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?;
+                }
+                "max-chunks-per-peer" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!("line {lineno}: missing value")
+                    })?;
+                    cfg.max_chunks_per_peer = val
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?;
+                }
+                "write-rate" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!("line {lineno}: missing value")
+                    })?;
+                    cfg.write_rate = val
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?;
+                }
+                "write-burst" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!("line {lineno}: missing value")
+                    })?;
+                    cfg.write_burst = val
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?;
+                }
+                "max-handlers" => {
+                    let val = tokens.get(1).ok_or_else(|| {
+                        anyhow::anyhow!("line {lineno}: missing value")
+                    })?;
+                    cfg.max_handlers = val
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?;
+                }
+                kw => bail!("line {lineno}: unknown keyword '{kw}'"),
+            }
+        }
+
+        Ok(cfg)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +301,96 @@ mod tests {
     #[test]
     fn unquote_rejects_mismatched() {
         assert!(unquote("\"hello").is_err());
+    }
+
+    #[test]
+    fn parse_minimal_config() {
+        let input = r#"
+# minimal config
+listen on 0.0.0.0 port 4433
+bootstrap "tesseras.net"
+"#;
+        let cfg = Config::parse_str(input).unwrap();
+        assert_eq!(cfg.listen_addr, "0.0.0.0".parse::<IpAddr>().unwrap());
+        assert_eq!(cfg.listen_port, 4433);
+        assert_eq!(cfg.bootstrap_peers.len(), 1);
+        assert_eq!(cfg.bootstrap_peers[0].host, "tesseras.net");
+        assert_eq!(cfg.bootstrap_peers[0].port, 4000);
+    }
+
+    #[test]
+    fn parse_full_config() {
+        let input = r#"
+listen on :: port 4000
+bootstrap "tesseras.net"
+bootstrap "157.90.160.207" port 4433
+data-dir "/tmp/tesd-test"
+max-storage 2G
+pow-difficulty 20
+mdns yes
+max-chunks-per-peer 512
+write-rate 100
+write-burst 40
+max-handlers 128
+"#;
+        let cfg = Config::parse_str(input).unwrap();
+        assert_eq!(cfg.listen_addr, "::".parse::<IpAddr>().unwrap());
+        assert_eq!(cfg.listen_port, 4000);
+        assert_eq!(cfg.bootstrap_peers.len(), 2);
+        assert_eq!(cfg.bootstrap_peers[1].host, "157.90.160.207");
+        assert_eq!(cfg.bootstrap_peers[1].port, 4433);
+        assert_eq!(cfg.data_dir, PathBuf::from("/tmp/tesd-test"));
+        assert_eq!(cfg.max_storage, 2 * 1024 * 1024 * 1024);
+        assert_eq!(cfg.pow_difficulty, 20);
+        assert!(cfg.mdns);
+        assert_eq!(cfg.max_chunks_per_peer, 512);
+        assert_eq!(cfg.write_rate, 100);
+        assert_eq!(cfg.write_burst, 40);
+        assert_eq!(cfg.max_handlers, 128);
+    }
+
+    #[test]
+    fn parse_empty_config_uses_defaults() {
+        let input = "# empty\n";
+        let cfg = Config::parse_str(input).unwrap();
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn parse_unknown_keyword_is_error() {
+        let input = "foobar 42\n";
+        let err = Config::parse_str(input).unwrap_err();
+        assert!(err.to_string().contains("line 1"));
+        assert!(err.to_string().contains("unknown keyword"));
+    }
+
+    #[test]
+    fn parse_listen_missing_on_is_error() {
+        let input = "listen 0.0.0.0\n";
+        let err = Config::parse_str(input).unwrap_err();
+        assert!(err.to_string().contains("expected 'on'"));
+    }
+
+    #[test]
+    fn parse_duplicate_listen_is_error() {
+        let input = "listen on :: port 4000\nlisten on 0.0.0.0 port 4001\n";
+        let err = Config::parse_str(input).unwrap_err();
+        assert!(err.to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn parse_bootstrap_without_quotes() {
+        // IP addresses don't require quotes
+        let input = "bootstrap 10.0.0.1 port 4433\n";
+        let cfg = Config::parse_str(input).unwrap();
+        assert_eq!(cfg.bootstrap_peers[0].host, "10.0.0.1");
+    }
+
+    #[test]
+    fn parse_listen_default_port() {
+        let input = "listen on 0.0.0.0\n";
+        let cfg = Config::parse_str(input).unwrap();
+        assert_eq!(cfg.listen_port, 4000);
     }
 
     #[test]
