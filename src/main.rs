@@ -291,10 +291,7 @@ async fn resolve_peer(s: &str, port: u16) -> Result<Vec<SocketAddr>> {
     bail!("resolve '{s}': {}", last_err.unwrap())
 }
 
-async fn run(
-    cfg: config::Config,
-    config_path: PathBuf,
-) -> Result<()> {
+async fn run(cfg: config::Config, config_path: PathBuf) -> Result<()> {
     let mut cfg = cfg;
 
     #[cfg(unix)]
@@ -325,7 +322,9 @@ async fn run(
 
     let first_run = !cfg.data_dir.join("metadata.db").exists();
     if first_run {
-        tracing::info!("first run, generating identity (PoW may take a moment)");
+        tracing::info!(
+            "first run, generating identity (PoW may take a moment)"
+        );
     }
 
     let node = Arc::new(builder.spawn().await?);

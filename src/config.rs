@@ -205,8 +205,9 @@ impl Config {
                         )
                     })?;
                     let host = if host_raw.starts_with('"') {
-                        unquote(host_raw)
-                            .map_err(|e| anyhow::anyhow!("line {lineno}: {e}"))?
+                        unquote(host_raw).map_err(|e| {
+                            anyhow::anyhow!("line {lineno}: {e}")
+                        })?
                     } else {
                         host_raw.to_string()
                     };
