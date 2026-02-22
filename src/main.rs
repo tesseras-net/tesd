@@ -2,7 +2,7 @@ mod config;
 
 use std::env;
 use std::io::Write;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
@@ -13,117 +13,77 @@ use tesseras_dht::prelude::*;
 use tracing::Level;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_PORT: u16 = 4000;
 const REBOOTSTRAP_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
-struct Opts {
-    ipv4_only: bool,
-    ipv6_only: bool,
-    listen_addr: Option<SocketAddr>,
-    bootstrap_peers: Vec<String>,
+struct CliOpts {
+    config_file: PathBuf,
+    configtest: bool,
     foreground: bool,
-    data_dir: Option<String>,
     verbosity: u8,
 }
 
-/// Parse `-a ip[@port]` into a SocketAddr. Default port is 4000.
-fn parse_listen_addr(s: &str) -> Result<SocketAddr> {
-    if let Some((ip_str, port_str)) = s.rsplit_once('@') {
-        let ip: IpAddr = ip_str
-            .parse()
-            .map_err(|e| anyhow::anyhow!("bad IP '{ip_str}': {e}"))?;
-        let port: u16 = port_str
-            .parse()
-            .map_err(|e| anyhow::anyhow!("bad port '{port_str}': {e}"))?;
-        Ok(SocketAddr::new(ip, port))
-    } else {
-        let ip: IpAddr = s
-            .parse()
-            .map_err(|e| anyhow::anyhow!("bad IP '{s}': {e}"))?;
-        Ok(SocketAddr::new(ip, DEFAULT_PORT))
-    }
-}
+fn parse_cli(args: &[&str]) -> Result<CliOpts> {
+    let mut opts = CliOpts {
+        config_file: PathBuf::from("/etc/tesd.conf"),
+        configtest: false,
+        foreground: false,
+        verbosity: 0,
+    };
 
-fn parse_args() -> Result<Opts> {
-    let args: Vec<String> = env::args().collect();
-
-    let mut opts = getopts::Options::new();
-    opts.optflag("4", "", "Only listen to IPv4 connections");
-    opts.optflag("6", "", "Only listen to IPv6 connections");
-    opts.optopt("a", "", "Listen address ip[@port]", "ADDR");
-    opts.optmulti("b", "", "Bootstrap peer host[@port]", "PEER");
-    opts.optflag("d", "", "Do not fork, stay in foreground");
-    opts.optopt("D", "", "Data directory", "DIR");
-    opts.optopt("V", "", "Verbosity level (0-4)", "LEVEL");
-    opts.optflag("h", "", "Print help and exit");
-    opts.optflag("v", "", "Print version and exit");
-
-    let usage_line = "usage: tesd [-46dhv] \
-        [-a ip[@port]] [-b host[@port]] \
-        [-D datadir] [-V level]";
-
-    let matches = opts.parse(&args[1..]).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    if matches.opt_present("h") {
-        eprint!("{}", opts.usage(usage_line));
-        process::exit(0);
-    }
-
-    if matches.opt_present("v") {
-        eprintln!("tesd {VERSION}");
-        process::exit(0);
-    }
-
-    if !matches.free.is_empty() {
-        eprint!("{}", opts.usage(usage_line));
-        process::exit(1);
-    }
-
-    let ipv4_only = matches.opt_present("4");
-    let ipv6_only = matches.opt_present("6");
-
-    if ipv4_only && ipv6_only {
-        bail!("cannot use both -4 and -6");
-    }
-
-    let listen_addr = match matches.opt_str("a") {
-        Some(s) => {
-            let addr = parse_listen_addr(&s)?;
-            if ipv4_only && addr.is_ipv6() {
-                bail!("IPv6 address {addr} not allowed with -4");
-            }
-            if ipv6_only && addr.is_ipv4() {
-                bail!("IPv4 address {addr} not allowed with -6");
-            }
-            Some(addr)
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if !arg.starts_with('-') || arg == "-" {
+            bail!("unexpected argument '{arg}'");
         }
-        None => None,
-    };
 
-    let bootstrap_peers = matches.opt_strs("b");
-    let foreground = matches.opt_present("d");
-    let data_dir = matches.opt_str("D");
-
-    let verbosity: u8 = match matches.opt_str("V") {
-        Some(s) => s
-            .parse()
-            .map_err(|_| anyhow::anyhow!("bad verbosity '{s}'"))?,
-        None => 0,
-    };
-
-    if verbosity > 4 {
-        bail!("verbosity must be 0-4");
+        let chars: Vec<char> = arg[1..].chars().collect();
+        let mut j = 0;
+        while j < chars.len() {
+            match chars[j] {
+                'f' => {
+                    let value = if j + 1 < chars.len() {
+                        let rest: String = chars[j + 1..].iter().collect();
+                        j = chars.len();
+                        rest
+                    } else {
+                        i += 1;
+                        args.get(i)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("-f requires an argument")
+                            })?
+                            .to_string()
+                    };
+                    opts.config_file = PathBuf::from(value);
+                }
+                'n' => opts.configtest = true,
+                'd' => opts.foreground = true,
+                'v' => opts.verbosity = opts.verbosity.saturating_add(1),
+                'h' => {
+                    eprint!(
+                        "usage: tesd [-dnvVh] [-f file]\n\n\
+                         Options:\n\
+                         \x20   -f file     Configuration file (default: /etc/tesd.conf)\n\
+                         \x20   -n          Check config and exit\n\
+                         \x20   -d          Do not fork, stay in foreground\n\
+                         \x20   -v          Verbose mode. Multiple -v increase verbosity\n\
+                         \x20   -h          Print help and exit\n\
+                         \x20   -V          Print version and exit\n"
+                    );
+                    process::exit(0);
+                }
+                'V' => {
+                    eprintln!("tesd {VERSION}");
+                    process::exit(0);
+                }
+                c => bail!("unknown option '-{c}'"),
+            }
+            j += 1;
+        }
+        i += 1;
     }
 
-    Ok(Opts {
-        ipv4_only,
-        ipv6_only,
-        listen_addr,
-        bootstrap_peers,
-        foreground,
-        data_dir,
-        verbosity,
-    })
+    Ok(opts)
 }
 
 #[cfg(unix)]
@@ -131,12 +91,10 @@ fn daemonize() -> Result<()> {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
-    // Set restrictive file creation mask
     unsafe {
         libc::umask(0o027);
     }
 
-    // First fork
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         bail!("fork: {}", std::io::Error::last_os_error());
@@ -145,12 +103,10 @@ fn daemonize() -> Result<()> {
         process::exit(0);
     }
 
-    // Create new session
     if unsafe { libc::setsid() } < 0 {
         bail!("setsid: {}", std::io::Error::last_os_error());
     }
 
-    // Second fork (prevent acquiring a controlling terminal)
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         bail!("fork: {}", std::io::Error::last_os_error());
@@ -159,12 +115,10 @@ fn daemonize() -> Result<()> {
         process::exit(0);
     }
 
-    // Change to root directory to avoid blocking unmounts
     if unsafe { libc::chdir(c"/".as_ptr()) } < 0 {
         bail!("chdir: {}", std::io::Error::last_os_error());
     }
 
-    // Redirect stdin/stdout/stderr to /dev/null
     let devnull = File::open("/dev/null")?;
     let fd = devnull.as_raw_fd();
     for target_fd in [0, 1, 2] {
@@ -223,30 +177,11 @@ fn setup_logging(foreground: bool, verbosity: u8) -> Result<()> {
             Level::TRACE => log::LevelFilter::Trace,
         });
 
-        // Bridge tracing events to log crate
         tracing_log::LogTracer::init()
             .map_err(|e| anyhow::anyhow!("log tracer: {e}"))?;
     }
 
     Ok(())
-}
-
-fn default_data_dir() -> Result<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        let base = env::var("LOCALAPPDATA")
-            .map_err(|_| anyhow::anyhow!("LOCALAPPDATA not set"))?;
-        Ok(PathBuf::from(base).join("tesd"))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Ok(PathBuf::from("/usr/local/var/lib/tesd"))
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        // Linux, FreeBSD, OpenBSD, NetBSD
-        Ok(PathBuf::from("/var/lib/tesd"))
-    }
 }
 
 fn ensure_data_dir(data_dir: &Path) -> Result<()> {
@@ -289,7 +224,6 @@ fn write_pid_file(data_dir: &Path) -> Result<std::fs::File> {
         .truncate(true)
         .open(&pid_path)?;
 
-    // Exclusive lock — fails if another instance holds it
     let ret =
         unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if ret < 0 {
@@ -319,55 +253,32 @@ fn remove_pid_file(data_dir: &Path) {
     let _ = std::fs::remove_file(data_dir.join("tesd.pid"));
 }
 
-/// Resolve a `-b host[@port]` string to socket addresses.
+/// Resolve a bootstrap peer host to socket addresses.
 /// Retries DNS resolution up to 3 times with exponential backoff.
-async fn resolve_peer(
-    s: &str,
-    ipv4_only: bool,
-    ipv6_only: bool,
-) -> Result<Vec<SocketAddr>> {
-    let (host, port) = if let Some((h, p)) = s.rsplit_once('@') {
-        let port: u16 =
-            p.parse().map_err(|_| anyhow::anyhow!("bad port '{p}'"))?;
-        (h.to_string(), port)
-    } else {
-        (s.to_string(), DEFAULT_PORT)
-    };
-
+async fn resolve_peer(s: &str, port: u16) -> Result<Vec<SocketAddr>> {
     // Try as IP literal first (no retry needed)
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    if let Ok(ip) = s.parse::<IpAddr>() {
         return Ok(vec![SocketAddr::new(ip, port)]);
     }
 
     // DNS resolution with retry
-    let lookup = format!("{host}:{port}");
+    let lookup = format!("{s}:{port}");
     let mut last_err = None;
 
     for attempt in 0..3u32 {
         match tokio::net::lookup_host(&lookup).await {
             Ok(addrs) => {
-                let filtered: Vec<SocketAddr> = addrs
-                    .filter(|addr| {
-                        if ipv4_only {
-                            addr.is_ipv4()
-                        } else if ipv6_only {
-                            addr.is_ipv6()
-                        } else {
-                            true
-                        }
-                    })
-                    .collect();
-
-                if filtered.is_empty() {
-                    bail!("no addresses found for '{host}'");
+                let resolved: Vec<SocketAddr> = addrs.collect();
+                if resolved.is_empty() {
+                    bail!("no addresses found for '{s}'");
                 }
-                return Ok(filtered);
+                return Ok(resolved);
             }
             Err(e) => {
                 last_err = Some(e);
                 if attempt < 2 {
                     tracing::warn!(
-                        peer = %host,
+                        peer = %s,
                         attempt = attempt + 1,
                         "DNS resolution failed, retrying"
                     );
@@ -377,13 +288,15 @@ async fn resolve_peer(
         }
     }
 
-    bail!("resolve '{host}': {}", last_err.unwrap())
+    bail!("resolve '{s}': {}", last_err.unwrap())
 }
 
-async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
-    // Register signal handlers before spawning node to
-    // avoid a race where signals arrive before handlers
-    // are installed.
+async fn run(
+    cfg: config::Config,
+    config_path: PathBuf,
+) -> Result<()> {
+    let mut cfg = cfg;
+
     #[cfg(unix)]
     let (mut sigterm, mut sigint, mut sighup) = {
         use tokio::signal::unix::{SignalKind, signal};
@@ -394,25 +307,25 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
         )
     };
 
-    // Build node
-    let mut builder = NodeBuilder::new(data_dir);
-    builder = builder.mdns(false);
+    let bind_addr = SocketAddr::new(cfg.listen_addr, cfg.listen_port);
 
-    let bind_addr = if let Some(addr) = opts.listen_addr {
-        addr
-    } else if opts.ipv4_only {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_PORT)
-    } else {
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_PORT)
-    };
-    builder = builder.bind(bind_addr);
+    let mut node_config = NodeConfig::default();
+    node_config.max_chunks_per_peer = cfg.max_chunks_per_peer;
+    node_config.write_rate_per_second = cfg.write_rate;
+    node_config.write_rate_burst = cfg.write_burst;
+    node_config.max_concurrent_handlers = cfg.max_handlers;
 
-    let first_run = !data_dir.join("metadata.db").exists();
+    let mut builder = NodeBuilder::new(&cfg.data_dir);
+    builder = builder
+        .bind(bind_addr)
+        .max_storage(cfg.max_storage)
+        .pow_difficulty(cfg.pow_difficulty)
+        .mdns(cfg.mdns)
+        .config(node_config);
+
+    let first_run = !cfg.data_dir.join("metadata.db").exists();
     if first_run {
-        tracing::info!(
-            "first run, generating identity \
-             (PoW may take a moment)"
-        );
+        tracing::info!("first run, generating identity (PoW may take a moment)");
     }
 
     let node = Arc::new(builder.spawn().await?);
@@ -425,11 +338,11 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
 
     // Resolve and bootstrap peers
     let mut all_addrs = Vec::new();
-    for peer in &opts.bootstrap_peers {
-        match resolve_peer(peer, opts.ipv4_only, opts.ipv6_only).await {
+    for peer in &cfg.bootstrap_peers {
+        match resolve_peer(&peer.host, peer.port).await {
             Ok(addrs) => {
                 tracing::info!(
-                    peer = %peer,
+                    peer = %peer.host,
                     count = addrs.len(),
                     "resolved bootstrap peer"
                 );
@@ -437,7 +350,7 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
             }
             Err(e) => {
                 tracing::warn!(
-                    peer = %peer,
+                    peer = %peer.host,
                     error = %e,
                     "failed to resolve bootstrap peer"
                 );
@@ -445,59 +358,42 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
         }
     }
 
-    // Spawn bootstrap as a background task so we can
-    // handle signals immediately (bootstrap may block for
-    // a long time if peers are unreachable).
     let bootstrap_handle = if !all_addrs.is_empty() {
         let node_handle = Arc::clone(&node);
         Some(tokio::spawn(async move {
             if let Err(e) = node_handle.bootstrap(all_addrs).await {
-                tracing::warn!(
-                    error = %e,
-                    "bootstrap failed"
-                );
+                tracing::warn!(error = %e, "bootstrap failed");
             }
         }))
     } else {
         None
     };
 
-    // Spawn periodic re-bootstrap task
-    let rebootstrap_handle = if !opts.bootstrap_peers.is_empty() {
+    // Re-bootstrap task
+    let rebootstrap_handle = if !cfg.bootstrap_peers.is_empty() {
         let node_handle = Arc::clone(&node);
-        let peers = opts.bootstrap_peers.clone();
-        let ipv4_only = opts.ipv4_only;
-        let ipv6_only = opts.ipv6_only;
-
+        let peers = cfg.bootstrap_peers.clone();
         Some(tokio::spawn(async move {
             loop {
                 tokio::time::sleep(REBOOTSTRAP_INTERVAL).await;
-
                 let mut addrs = Vec::new();
                 for peer in &peers {
-                    match resolve_peer(peer, ipv4_only, ipv6_only).await {
+                    match resolve_peer(&peer.host, peer.port).await {
                         Ok(a) => addrs.extend(a),
                         Err(e) => {
                             tracing::warn!(
-                                peer = %peer,
+                                peer = %peer.host,
                                 error = %e,
-                                "re-bootstrap: resolve \
-                                 failed"
+                                "re-bootstrap: resolve failed"
                             );
                         }
                     }
                 }
-
                 if !addrs.is_empty() {
                     match node_handle.bootstrap(addrs).await {
-                        Ok(()) => {
-                            tracing::debug!("re-bootstrap completed");
-                        }
+                        Ok(()) => tracing::debug!("re-bootstrap completed"),
                         Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                "re-bootstrap failed"
-                            );
+                            tracing::warn!(error = %e, "re-bootstrap failed")
                         }
                     }
                 }
@@ -507,7 +403,7 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
         None
     };
 
-    // Wait for shutdown signal
+    // Signal loop (SIGHUP reload placeholder — Task 8)
     #[cfg(unix)]
     loop {
         tokio::select! {
@@ -520,7 +416,20 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
                 break;
             }
             _ = sighup.recv() => {
-                tracing::info!("received SIGHUP, ignoring");
+                tracing::info!("received SIGHUP, reloading configuration");
+                match config::Config::parse(&config_path) {
+                    Ok(new_cfg) => {
+                        cfg.log_reload_diff(&new_cfg);
+                        cfg = new_cfg;
+                        tracing::info!("configuration reloaded");
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "failed to reload configuration, keeping current"
+                        );
+                    }
+                }
             }
         }
     }
@@ -531,7 +440,6 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
         tracing::info!("received Ctrl+C");
     }
 
-    // Cleanup
     if let Some(handle) = bootstrap_handle {
         handle.abort();
     }
@@ -541,12 +449,14 @@ async fn run(opts: Opts, data_dir: &Path) -> Result<()> {
 
     tracing::info!("shutting down");
     node.shutdown().await;
-
     Ok(())
 }
 
 fn main() {
-    let opts = match parse_args() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let cli = match parse_cli(&arg_refs) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("tesd: {e}");
@@ -554,41 +464,39 @@ fn main() {
         }
     };
 
-    let data_dir = match &opts.data_dir {
-        Some(d) => PathBuf::from(d),
-        None => match default_data_dir() {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("tesd: {e}");
-                process::exit(1);
-            }
-        },
+    let cfg = match config::Config::parse(&cli.config_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("tesd: {e}");
+            process::exit(1);
+        }
     };
 
-    // Fork must happen before tokio runtime starts
+    if cli.configtest {
+        eprintln!("configuration OK");
+        process::exit(0);
+    }
+
+    let data_dir = cfg.data_dir.clone();
+
     #[cfg(unix)]
-    if !opts.foreground
+    if !cli.foreground
         && let Err(e) = daemonize()
     {
         eprintln!("tesd: {e}");
         process::exit(1);
     }
 
-    // Logging must be set up after fork (syslog connects
-    // from child)
-    if let Err(e) = setup_logging(opts.foreground, opts.verbosity) {
+    if let Err(e) = setup_logging(cli.foreground, cli.verbosity) {
         eprintln!("tesd: {e}");
         process::exit(1);
     }
 
-    // Ensure data directory exists with correct permissions
     if let Err(e) = ensure_data_dir(&data_dir) {
         tracing::error!(error = %e, "data directory");
         process::exit(1);
     }
 
-    // Write PID file (holds flock to prevent multiple
-    // instances)
     let _pid_guard = match write_pid_file(&data_dir) {
         Ok(f) => f,
         Err(e) => {
@@ -597,89 +505,14 @@ fn main() {
         }
     };
 
-    // Build and run tokio runtime
     let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
-    if let Err(e) = rt.block_on(run(opts, &data_dir)) {
+    if let Err(e) = rt.block_on(run(cfg, cli.config_file.clone())) {
         tracing::error!(error = %e, "fatal error");
         remove_pid_file(&data_dir);
         process::exit(1);
     }
 
     remove_pid_file(&data_dir);
-}
-
-struct CliOpts {
-    config_file: PathBuf,
-    configtest: bool,
-    foreground: bool,
-    verbosity: u8,
-}
-
-fn parse_cli(args: &[&str]) -> Result<CliOpts> {
-    let mut opts = CliOpts {
-        config_file: PathBuf::from("/etc/tesd.conf"),
-        configtest: false,
-        foreground: false,
-        verbosity: 0,
-    };
-
-    let mut i = 0;
-    while i < args.len() {
-        let arg = args[i];
-        if !arg.starts_with('-') || arg == "-" {
-            bail!("unexpected argument '{arg}'");
-        }
-
-        let chars: Vec<char> = arg[1..].chars().collect();
-        let mut j = 0;
-        while j < chars.len() {
-            match chars[j] {
-                'f' => {
-                    // -f takes the next argument, or remainder of this arg
-                    let value = if j + 1 < chars.len() {
-                        // -fFILE (value glued to flag)
-                        let rest: String = chars[j + 1..].iter().collect();
-                        j = chars.len(); // consume rest
-                        rest
-                    } else {
-                        // -f FILE (next argument)
-                        i += 1;
-                        args.get(i)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("-f requires an argument")
-                            })?
-                            .to_string()
-                    };
-                    opts.config_file = PathBuf::from(value);
-                }
-                'n' => opts.configtest = true,
-                'd' => opts.foreground = true,
-                'v' => opts.verbosity = opts.verbosity.saturating_add(1),
-                'h' => {
-                    eprint!(
-                        "usage: tesd [-dnvVh] [-f file]\n\n\
-                         Options:\n\
-                         \x20   -f file     Configuration file (default: /etc/tesd.conf)\n\
-                         \x20   -n          Check config and exit\n\
-                         \x20   -d          Do not fork, stay in foreground\n\
-                         \x20   -v          Verbose mode. Multiple -v increase verbosity\n\
-                         \x20   -h          Print help and exit\n\
-                         \x20   -V          Print version and exit\n"
-                    );
-                    process::exit(0);
-                }
-                'V' => {
-                    eprintln!("tesd {VERSION}");
-                    process::exit(0);
-                }
-                c => bail!("unknown option '-{c}'"),
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-
-    Ok(opts)
 }
 
 #[cfg(test)]
@@ -741,11 +574,5 @@ mod tests {
         assert_eq!(verbosity_to_level(3), Level::DEBUG);
         assert_eq!(verbosity_to_level(4), Level::TRACE);
         assert_eq!(verbosity_to_level(255), Level::TRACE);
-    }
-
-    #[test]
-    fn default_data_dir_returns_path() {
-        let dir = default_data_dir().unwrap();
-        assert!(!dir.as_os_str().is_empty());
     }
 }

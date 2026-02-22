@@ -78,6 +78,58 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Log changes between current and new config.
+    pub fn log_reload_diff(&self, new: &Config) {
+        if self.listen_addr != new.listen_addr
+            || self.listen_port != new.listen_port
+        {
+            tracing::warn!("listen address changed, requires restart");
+        }
+        if self.bootstrap_peers != new.bootstrap_peers {
+            tracing::warn!("bootstrap peers changed, requires restart");
+        }
+        if self.data_dir != new.data_dir {
+            tracing::warn!("data-dir changed, requires restart");
+        }
+        if self.max_storage != new.max_storage {
+            tracing::warn!("max-storage changed, requires restart");
+        }
+        if self.pow_difficulty != new.pow_difficulty {
+            tracing::warn!("pow-difficulty changed, requires restart");
+        }
+        if self.mdns != new.mdns {
+            tracing::warn!("mdns changed, requires restart");
+        }
+        if self.max_chunks_per_peer != new.max_chunks_per_peer {
+            tracing::info!(
+                "max-chunks-per-peer: {} -> {}",
+                self.max_chunks_per_peer,
+                new.max_chunks_per_peer
+            );
+        }
+        if self.write_rate != new.write_rate {
+            tracing::info!(
+                "write-rate: {} -> {}",
+                self.write_rate,
+                new.write_rate
+            );
+        }
+        if self.write_burst != new.write_burst {
+            tracing::info!(
+                "write-burst: {} -> {}",
+                self.write_burst,
+                new.write_burst
+            );
+        }
+        if self.max_handlers != new.max_handlers {
+            tracing::warn!(
+                "max-handlers: {} -> {} (requires restart)",
+                self.max_handlers,
+                new.max_handlers
+            );
+        }
+    }
+
     /// Parse a config file from disk.
     pub fn parse(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
