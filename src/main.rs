@@ -306,11 +306,13 @@ async fn run(cfg: config::Config, config_path: PathBuf) -> Result<()> {
 
     let bind_addr = SocketAddr::new(cfg.listen_addr, cfg.listen_port);
 
-    let mut node_config = NodeConfig::default();
-    node_config.max_chunks_per_peer = cfg.max_chunks_per_peer;
-    node_config.write_rate_per_second = cfg.write_rate;
-    node_config.write_rate_burst = cfg.write_burst;
-    node_config.max_concurrent_handlers = cfg.max_handlers;
+    let node_config = NodeConfig {
+        max_chunks_per_peer: cfg.max_chunks_per_peer,
+        write_rate_per_second: cfg.write_rate,
+        write_rate_burst: cfg.write_burst,
+        max_concurrent_handlers: cfg.max_handlers,
+        ..Default::default()
+    };
 
     let mut builder = NodeBuilder::new(&cfg.data_dir);
     builder = builder

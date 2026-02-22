@@ -132,12 +132,13 @@ impl Config {
 
     /// Build a NodeConfig with the reloadable tuning fields.
     pub fn to_node_config(&self) -> tesseras_dht::prelude::NodeConfig {
-        let mut nc = tesseras_dht::prelude::NodeConfig::default();
-        nc.max_chunks_per_peer = self.max_chunks_per_peer;
-        nc.write_rate_per_second = self.write_rate;
-        nc.write_rate_burst = self.write_burst;
-        nc.max_concurrent_handlers = self.max_handlers;
-        nc
+        tesseras_dht::prelude::NodeConfig {
+            max_chunks_per_peer: self.max_chunks_per_peer,
+            write_rate_per_second: self.write_rate,
+            write_rate_burst: self.write_burst,
+            max_concurrent_handlers: self.max_handlers,
+            ..Default::default()
+        }
     }
 
     /// Parse a config file from disk.
